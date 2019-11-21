@@ -1,0 +1,261 @@
+#!/usr/iw-home/iw-perl/bin/iwperl
+
+########################################################################
+#
+# Save_Extended_Attributes.ipl
+#
+# by Andy Farnsworth - farnsaw@stonedoor.com
+#
+# This program is designed to save and restore the Extended Attributes (EAs)
+# on files stored in a TeamSite WORKAREA.  It will successfully save
+# EAs from STAGING areas and EDITIONS as well, however,
+# since TeamSite STAGING areas and EDITIONS are Read-Only, it will only
+# restore EAs to a WORKAREA.
+#
+# Future features will include filters to save EAs for Generated Files only, DCRs Only,
+# Generated Files and DCRs Only, and files that are NOT DCRs or Generated Files,
+# Specifying a destination workarea, rather than a file which will cause the system to
+# set the attributes on the files in that workarea immediately.
+#
+#
+#
+$VERSION = '1.4';
+#
+# v1.0 - Initial Release - March 19, 2001
+#
+# v1.1 - EDITION now gives latest edition - July 10, 2001
+#                When you end the directory path in the keyword 'EDITION' the program
+#                will save the extended attributes for the latest edition.
+#
+# v1.2 - Dirwalk Option - May 24, 2006
+#                Include the option that will use the TeamSite::Dirwalk module rather than File::Find.
+#
+# v1.3 - Changed metadata split character(s) to "[|]" - Aug 21, 2006
+#
+# v1.4 - Changed all split characters to the string "[|]" (less the quotes) - Aug 31, 2006
+#		 This includes during the creation of the ext attributes log file.
+#
+########################################################################
+
+use TeamSite::Config;
+use TeamSite::Dirwalk;
+use File::Find;
+
+my $iw_home = TeamSite::Config::iwgethome();
+my $iw_mount = TeamSite::Config::iwgetmount();
+my $usage_error = 0;
+my $count = 0;
+
+foreach $arg (@ARGV)
+{
+print "hello";
+        $key = undef;
+        $value = undef;
+
+        ($key, $value) = split /=/, $arg;
+        $key = substr $key, (1 + index $key, '-');
+
+        $value =~ s|\\|/|go if ($key eq 'dir');
+        $value =~ s|/$||o if ($key eq 'dir');
+
+        $argv{$key} = $value;
+}
+
+delete $argv{use_dirwalk} unless (lc $argv{use_dirwalk} eq 'true');
+
+usage_error() if (exists $argv{'help'});
+usage_error() unless ((exists $argv{'dir'}) && (exists $argv{'file'}) );
+
+$status_log = $0;
+$status_log = substr $status_log, 0, (rindex $status_log, '.');
+$status_log .= '.log';
+
+if ($argv{dir} =~ /EDITION$/)
+{
+        my $branch_path = $argv{dir};
+        $branch_path =~ s|^[a-zA-Z]:||go;
+        $branch_path =~ s|/EDITION$||go;
+
+        my $cmd = $iw_home . "/bin/iwlasted.exe $branch_path";
+        my $latest_edition = `$cmd 2>&1`;
+        chomp $latest_edition;
+
+        $argv{dir} .= "/$latest_edition";
+}
+
+open STATUS_LOG, ">>$status_log";
+
+print "Save Extended Attributes\n";
+print "------------------------\n";
+
+$attribute_file_name    = $argv{'file'};
+$starting_dir                           = $argv{'dir'};
+
+# Clean up the Starting Directory making sure the Driver Letter
+# is Capitalized and the slashes all go the same way.
+
+$starting_dir =~ s|\\|/|go;
+$starting_dir =~ s|/*$||go;
+$drive_letter = substr $starting_dir, 0, 1;
+$drive_letter = uc $drive_letter;
+$starting_dir = $drive_letter . substr $starting_dir, 1;
+
+print "[", scalar localtime(), "] START\n";
+
+if (exists $argv{'restore'})
+{
+        if ( ($starting_dir =~ /STAGING/) || ($starting_dir =~ /EDITION/) || ($starting_dir !~ /WORKAREA/))
+        {
+                print "  FATAL ERROR:  Read-Only destination Selected!\n";
+                print "  Restore must be to a WORKAREA, not an EDITION or the STAGING area.\n";
+                exit;
+        }
+
+        print "  Restoring from $argv{'file'} into $argv{'dir'}\n\n\n";
+        restore_extattr();
+}
+else
+{
+        print "  Saving $argv{'dir'} into $argv{'file'}\n\n\n";
+        save_extattr();
+}
+
+close STATUS_LOG;
+print "[", scalar localtime(), "] Files: $count Directories: $dircount\n";
+print "[", scalar localtime(), "] END\n";
+exit;
+
+sub process_file
+{
+        $relative_path = $File::Find::name;
+        $relative_path = substr $relative_path, (length $starting_dir);
+#       print STATUS_LOG "process_file($File::Find::name)\n";
+
+        if (-f $File::Find::name)
+        {
+                $count++;
+                $cmd = $iw_home . qq|/bin/iwextattr "$File::Find::name"|;
+                $rv = `$cmd`;
+                chomp $rv;
+                $rv =~ s/\n/[|]/gm;
+                print LOG $relative_path . '[|]' . $rv . "\n" if ($rv);
+        }
+		else
+		{
+		$dircount++;
+		}
+        return;
+}
+
+sub save_extattr
+{
+    if (-f $attribute_file_name)
+    {
+        print "ERROR: File already exists. $attribute_file_name\n";
+        exit;
+    }
+    open LOG, ">$attribute_file_name";
+	if ($argv{use_dirwalk})
+	{
+        push @DIRLIST, $starting_dir;
+        print STATUS_LOG "save_extattr($starting_dir)\n";
+        find(\&process_file, @DIRLIST);
+        return;
+	}
+	else
+	{
+	    my $d = TeamSite::Dirwalk->new( dir_handler      => \&dir_counter,
+	                                    file_handler     => \&process_file_dirwalk,
+	                                    error_handler    => \&custom_error_handler,
+	                                    trace            => 1,
+	                                    follow_symlinks  => 0,
+	                                  );
+
+		$d->dirwalk($starting_dir);
+	}
+    close LOG;
+}
+
+sub dir_counter
+{
+	$dircount++;
+	my ($this,$dir,$depth) = @_;
+	if ($this->{aux}{error}) { return 0; }   # return early on error!
+	return 1;
+}
+
+sub custom_error_handler
+{
+	my ($this,$dirname,$os_err) = @_;
+	$this->{aux}{error} =  $os_err;          # make custom_dir_handler
+	print STATUS_LOG "ERROR: $os_err\n";
+}
+
+
+sub process_file_dirwalk
+{
+	my ($this,$abs_filename,$depth) = @_;
+	$relative_path = $abs_filename;
+	$relative_path = substr $relative_path, (length $starting_dir);
+	$count++;
+	$cmd = $iw_home . qq|/bin/iwextattr "$abs_filename"|;
+	$rv = `$cmd`;
+	chomp $rv;
+	$rv =~ s/\n/[|]/gm;
+	print LOG $relative_path . '[|]' . $rv . "\n" if ($rv);
+	return(1);
+}
+
+sub restore_extattr
+{
+        open LOG, "<$attribute_file_name";
+        while ($line = <LOG>)
+        {
+                @attrs = split /\[\|]/, $line;
+                $file = shift @attrs;
+                $file = "/" . $file unless ($file =~ /^\//);
+                $file_path = $starting_dir . $file;
+
+
+                #($file, $attr) = split /\?/, $line;
+                #@attrs = split /&/, $attr;
+
+                foreach $kvPair (@attrs)
+                {
+                        #$file_path = $starting_dir . $file;
+                        chomp $kvPair;
+                        $cmd = qq|$iw_home/bin/iwextattr -s $kvPair "$file_path"|;
+
+                        $rv = `$cmd 2>&1`;
+
+                        if ($rv =~ /^ERROR:/)
+                        {
+                                print STATUS_LOG "$rv:$file_path\n\n";
+                        }
+                }
+        }
+        close LOG;
+        return;
+}
+
+sub usage_error
+{
+        print "Usage Error: Save Extended Attributes v$VERSION\n";
+        print "-----------------------------------------------\n";
+        print "  Save_Extended_Attributes.ipl [-restore] -dir=<dir path> -file=<file path>\n";
+        print "    -restore restore on files in -dir using attributes in -file\n";
+        print "    -dir the directory path to start from, must include the drive letter\n";
+        print "        If the directory ends in 'EDITION' the latest edition will be used.\n";
+        print "    -file the path and file name of the file to store the extended attributes in";
+        print "\n\n";
+        print "  example:\n";
+        print "     The following example saves the extended attributes of all the files\n";
+        print "     found in Y:/default/main/WORKAREA/test into the file C:/TEMP/ExtAttr.log\n";
+        print "     This example has been broken up over three lines,\n";
+        print "     you need to type it all on one line.\n\n";
+        print "     Save_Extended_Attributes.ipl \n";
+        print "         -dir=Y:/default/main/WORKAREA/test\n";
+        print "         -file=C:/TEMP/ExtAttr.log\n";
+        print "\n\n";
+        exit;
+}

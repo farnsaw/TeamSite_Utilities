@@ -1,0 +1,124 @@
+#!C:\Interwoven\TeamSite\iw-perl\bin\iwperl.exe
+
+########################################################################
+#
+# resetMSTS.ipl
+#
+# by Andy Farnsworth - farnsaw@stonedoor.com
+#
+# This program is designed to reset Microsoft Terminal Server sessions
+# remotely if they have hung or if there are too many users currently logged in.
+# 
+# It displays the list of currently active sessions and gives you the opportunity to reset one.
+#
+#
+$VERSION = '1.0';
+#
+# v1.0 - Initial Release - October 19, 2005
+#
+########################################################################
+
+use CGI;
+use CGI::Carp qw(fatalsToBrowser);
+
+if (0)
+{
+	#
+	# Temporary hack due to lack of Terminal Services Licenses
+	#
+
+	use File::Copy;
+
+	my $source_file = "Y:\\default\\main\\Virgin\\Mobile\\Internet\\IDE\\WORKAREA\\hendera\\config\\vm-visualformatconfig.xml";
+	my $destination = "C:\\Interwoven\\TeamSite\\httpd\\iw\\vm\\vm-visualformatconfig.xml";
+
+	copy($source_file, $destination);
+
+	$source_file = "Y:\\default\\main\\Virgin\\Mobile\\Internet\\IDE\\WORKAREA\\hendera\\config\\vm-visualformatstyle.css";
+	$destination = "C:\\Interwoven\\TeamSite\\httpd\\iw\\vm\\vm-visualformatstyle.css";
+
+	copy($source_file, $destination);
+}
+
+my $service = "Terminal Services";
+$service = "Apache Tomcat";
+
+my $id = CGI::param('id');
+
+$| = 1;
+print "Content-Type: text/html\n\n";
+
+print "<HTML><BODY><center><h2>Remote Desktop Session Status</h2>\n";
+my $cmd = qq|qwinsta|;
+
+my $rv = `$cmd 2>&1`;
+
+print "<table BORDER=1>\n";
+my $rowcount = 0;
+
+foreach $line (split '\n', $rv)
+{
+	chomp $line;
+	$line =~ s|^\s+||go;
+	$line =~ s|\s+$||go;
+
+	@parts = split '\s+', $line;
+	my $count = 0;
+	my $pc = $#parts;
+
+	unless ($rowcount++)
+	{
+		pop @parts;
+		print "<tr>";
+		foreach $part (@parts)
+		{
+			print "<th>$part</th>";
+		}
+		print "</tr>\n";
+
+		next;
+	}
+
+	if ($pc < 4)
+	{
+		@parts = ($parts[0], $parts[1], "&nbsp;", $parts[2], $parts[3]);
+	}
+
+	if (($parts[3] =~ /Disc/i) && ($parts[1] > 0) )
+	{
+		$parts[2] = $parts[1];
+		$parts[1] = '&nbsp;';
+	}
+
+	my $id = $parts[2];
+
+	$parts[2] =  qq|$id <a href="/iw-bin/resetMSTS.ipl?id=$id">Reset</a>| unless ($id eq '&nbsp;');
+
+	print "<tr>";
+	foreach $part (@parts)
+	{
+		print "<td>$part</td>";
+		$mycount++;
+	}
+	print "</tr>\n";
+}
+
+print "</table>\n";
+print qq|<a href="/iw-bin/resetMSTS.ipl">Refresh List</a><br>\n</center>|;
+
+#print "id = $id\n\n<pre>Command: $cmd\n\nResult:\n$rv\n\n</pre>";
+
+if ($id > 0)
+{
+	print " " x 10240;
+
+	$cmd = qq|rwinsta $id|;
+
+	$rv = `$cmd 2>&1`;
+
+	print "<pre>Command: $cmd\n\nResult: $rv\n\n</pre>";
+	print qq|<meta http-equiv="Refresh" content="0;url=/iw-bin/resetMSTS.ipl">|;
+}
+print "</body></html>\n";
+
+exit;

@@ -1,0 +1,246 @@
+#!D:\System\iw-home/iw-perl/bin/iwperl
+
+##################################################################################
+#
+#		Make it a DCR
+#
+#		by Andy Farnsworth
+#		email: farnsaw@stonedoor.com
+#
+#		March 14, 2001
+#
+#		Version 1.0
+my $VERSION = '1.2';
+#
+#		This program runs under Interwoven TeamSite v4.5.1 and should work under any
+#		version from 4.2.1 on.  Place it in the iw-home/httpd/iw-bin/ directory and
+#		modify your iw.cfg file to add it as a custom menu item.  Then select any file
+#		or files in your WorkArea and select the Make It A DCR menu item.  If the
+#		files are located in the valid DCR path
+#
+# Version 1.1 - June 26, 2001 - Andy Farnsworth
+#
+#	Changed the '\\' to a '/' so it works on either Windows or Unix
+#
+# Version 1.2 - April 12, 2005 - Andy Farnsworth
+#
+#	Updated docs to reflect TeamSite 6.x
+#
+#
+##################################################################################
+
+# CGI requirements
+$| = 1;
+print "Content-type: text/html\n\n";
+
+use TeamSite::Config;
+use TeamSite::CGI_lite;
+
+#
+# Get TeamSite Configuration Information
+#
+my $iw_home  = TeamSite::Config::iwgethome();
+my $iw_mount = TeamSite::Config::iwgetmount();
+my $count	 = 0;
+$cgi = new TeamSite::CGI_lite;
+$cgi->parse_data();
+
+my $use_custom_templatedata_directory = 0; # Set to 1 if template data directory is not named "templatedata"
+
+#
+#	Note: The Delimiter between $cat and $type is slash by default but backslash for Windows.
+#
+my $delimiter = "/";
+#if ($^O eq "MSWin32")
+#{ $delimiter = "\\"; }
+#else
+#{ $delimiter = "/";  }
+
+
+normalize_vpath();
+
+# dump_cgi_params();
+
+@files = @{$cgi->{form}{'vpath'}};
+
+print <<END_HTML;
+<html>
+	<head>
+		<link rel="stylesheet" type="text/css" href="/iw-cc/base/styles/iw.css">
+		<link rel="stylesheet" type="text/css" href="/iw-cc/base/styles/custom.css">
+		<link rel="stylesheet" type="text/css" href="/iw-cc/teamsite/styles/iw.css">
+		<link rel="stylesheet" type="text/css" href="/iw-cc/teamsite/styles/custom.css">
+		<link rel="stylesheet" type="text/css" href="/iw-cc/ccpro/styles/iw.css">
+		<link rel="stylesheet" type="text/css" href="/iw-cc/ccpro/styles/custom.css">
+		<title>
+		  ContentCenter Professional - Make it a DCR
+		</title>
+	</head>
+	<body class="iw-ccpro-ui-background-top" scroll="yes">
+		<div style="background-color:white; padding-top:5px">
+			<table border="0" width="100%" cellspacing="0" cellpadding="2">
+				<tr>
+					<td width="1px" align="left" nowrap><img src="/iw-cc/ccpro/images/logo.gif" style="border:0px"></td>
+					<td width="1px">
+						<a id="iw.ccpro.common.interwoven.link" title="Powered by Interwoven" onclick="javascript:fw_widgets.open_new_window(this); return false;" href="http://www.interwoven.com" iw_wf="width=950,height=700,scrollbars=1,menubar=1,titlebar=1,resizable=1,status=1,center=true" iw_enabled="true" class="iw-base-link">
+						<img alt="Powered by Interwoven" title="Powered by Interwoven" src="/iw-cc/teamsite/images/logo_poweredby.gif" align="absmiddle" class="iw-base-link-icon"/></a>
+					</td>
+					<td width="100%" align="right" nowrap>
+						<table cellspacing="0px" border="0px" cellpadding="0px"> 
+							<tr>
+								<td nowrap>
+									<a id="iw.ccpro.common.actions_top_actionlist.logout.link" target="_top" href="/iw-cc/command/iw.reportingui.logout" iw_enabled="true" iw_styleE="" iw_styleD="" style="" iw_cssE="iw-base-actionlist-link" iw_cssD="iw-base-link-disabled" class="iw-base-actionlist-link">Logout</a>
+								</td>
+								<td><img src="/iw-cc/base/images/div_banner.gif"/></td>
+								<td nowrap>
+									<a id="iw.ccpro.common.actions_top_actionlist.info.link" target="_top" title="User: TEAXI0001\tsadmin (Editor)" href="/iw-cc/command/iw.ccpro.info" iw_enabled="true" iw_styleE="" iw_styleD="" style="" iw_cssE="iw-base-actionlist-link" iw_cssD="iw-base-link-disabled" class="iw-base-actionlist-link">About</a>
+								</td><td><img src="/iw-cc/base/images/div_banner.gif"/></td>
+								<td nowrap>
+									<a id="iw.ccpro.common.actions_top_actionlist.help.link" target="help" onclick="javascript:fw_widgets.open_new_window(this); return false;" href="/iw-cc/ccpro/help/en/p_getting_started.html" iw_wf="width=600,height=450,scrollbars=1,menubar=0,titlebar=0,resizable=1,status=1,dependent=false" iw_enabled="true" iw_styleE="" iw_styleD="" style="" iw_cssE="iw-base-actionlist-link" iw_cssD="iw-base-link-disabled" class="iw-base-actionlist-link">Help</a>
+								</td>
+							</tr>
+						</table>
+					</td>
+				</tr>
+			</table>
+			<div style="margin-top:1px; margin-bottom:3px; overflow:hidden; border-top: 1px #ccc solid"></div><br>
+			<table>
+END_HTML
+
+foreach $file (@files)
+{
+	makeDCR($file);
+}
+print "</table>\n";
+print qq|<form><input type="reset" value="close" onClick="self.close()"></form>\n|;
+print "</div></body></html>\n";
+
+exit;
+
+sub makeDCR
+{
+	my ($file) = @_;
+	my $filename = substr $file, 1 + rindex $file, '/';
+
+	$count++;
+	
+	#
+	# Commented out, usually the data_root variable does not exist
+	# in the [teamsite_templating] section of iw.cfg and this would
+	# generate an error each time it ran.  Uncomment if you use this feature.
+	#
+	my $templatedata = 'templatedata';
+
+	if ($use_custom_templatedata_directory)
+	{
+		$templatedata = `$iw_home/bin/iwconfig teamsite_templating data_root`;
+		chomp $templatedata;
+		$templatedata =~ s|^\/||go;
+	}
+
+	#
+	# Build the Area_Path
+	#
+	# This should be updated to get the store name since multiple stores are now supported.
+	#
+	$file =~ s|^//[^/]+/([^/]+)/|$iw_mount\\$1/|go;
+#	$backing_store = $1;
+
+	unless (-f $file)
+	{
+		print "<tr><td align='left'>$count</td><th align='left' bgcolor='red'>$filename</th><th> is not a file.</th></tr>";
+		return();
+	}
+
+	$file =~ /^.*\/$templatedata\/([^\/]+)\/([^\/]+)\/data\//;
+	my $cat = $1;
+	my $type = $2;
+
+	unless ($cat && $type)
+	{
+		print "<tr><td align='left'>$count</td><th align='left' bgcolor='red'>$filename</th><th> is not a dcr.</th></tr>\n";
+		return();
+	}
+
+	$file =~ s|/|\\|go;
+	my $cmd = "$iw_home/bin/iwextattr -s TeamSite/Templating/DCR/Type=" . $cat . $delimiter . $type . qq| "$file"|;
+	$rv =`$cmd 2>&1`; chomp $rv;
+	
+	if (length $rv)
+	{
+		print "<tr><td align='left'>$count</td><th bgcolor='red' align='left'>$filename</th><td>$rv</td></tr>\n";
+	}
+	else
+	{
+		print "<tr><td align='left'>$count</td><th align='left'>$filename</th><td> has been set as a DCR.</td></tr>\n";
+	}
+}
+
+sub normalize_vpath
+{
+	#
+	# If a single file is selected ( or no file ) then the vpath variable comes in as a string.
+	# If several files are selected then the vpath variable comes in as an Array Reference.
+	# To normalize this behavious, we check for a string and convert it into a Reference to an Array with a single element.
+	#
+	unless (ref $cgi->{form}{vpath})
+	{
+		my @localarray;
+		push @localarray, $cgi->{form}{vpath};
+		$cgi->{form}{vpath} = \@localarray;
+	}
+}
+
+sub dump_cgi_params
+{
+	print "<center><h2>CGI Parameters</h2></center>";
+	print qq|<hr><table border="2">\n|;
+	foreach $key (keys %{$cgi->{form}})
+	{
+		my $value = $cgi->{form}{$key};
+		if (ref $cgi->{form}{$key})
+		{
+			$value = "";
+			if ("ARRAY" eq ref $cgi->{form}{$key})
+			{
+				foreach $item (@{$cgi->{form}{$key}})
+				{
+					$value .= $item . "\n";
+				}
+			}
+		}
+		else
+		{
+			$value = $cgi->{form}{$key};
+		}
+		print "<tr><td>$key</td><td><pre>$value</pre></td></tr>\n";
+	}
+	print "</table>\n";
+}
+
+sub dump_arguments
+{
+	my $count = 0;
+	print "<center><h2>Arguments</h2></center>";
+	print qq|<hr><table border="2">\n|;
+	foreach $arg (@ARGV)
+	{
+		print "<tr><td>$count</td><td><pre>$arg</pre></td></tr>\n";
+		$count++;
+	}
+	print "</table>\n";
+}
+
+sub dump_input
+{
+	my $count = 0;
+	my @input = <STDIN>;
+	print "<center><h2>Input</h2></center>";
+	print qq|<hr><table border="2">\n|;
+	foreach $line (@input)
+	{
+		print "<tr><td>$count</td><td><pre>$line</pre></td></tr>\n";
+		$count++;
+	}
+	print "</table>\n";
+}
